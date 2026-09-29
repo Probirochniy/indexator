@@ -7,7 +7,7 @@ protobuf:
   files:
     - erc20.proto
   importPaths:
-    - ./proto
+    - ../proto
 
 binaries:
   default:

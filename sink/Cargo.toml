@@ -7,7 +7,7 @@ build = "build.rs"
 [dependencies]
 tokio = { version = "1.38", features = ["full"] }
 sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "macros", "migrate", "bigdecimal"] }
-tonic = { version = "0.14.6", features = ["tls-ring", "tls-native-roots"] }
+tonic = { version = "0.14.6", features = ["tls-ring", "tls-native-roots", "gzip", "zstd"] }
 tonic-prost = "0.14"
 prost = "0.14.4"
 prost-types = "0.14.4"

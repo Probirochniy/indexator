@@ -11,9 +11,9 @@ message Request {
   string start_cursor = 2;
   uint64 stop_block_num = 3;
   bool final_blocks_only = 4;
-  Modules modules = 5;
+  bool production_mode = 5;
   string output_module = 6;
-  bool production_mode = 7;
+  Modules modules = 7;
 }
 
 message Modules {
@@ -79,8 +79,10 @@ message Output {
 
 message Response {
   oneof message {
-    BlockScopedData block_scoped_data = 1;
-    BlockUndoSignal block_undo_signal = 2;
+    SessionInit session = 1;
+    ModulesProgress progress = 2;
+    BlockScopedData block_scoped_data = 3;
+    BlockUndoSignal block_undo_signal = 4;
   }
 }
 
@@ -115,3 +117,6 @@ message BlockUndoSignal {
   BlockRef last_valid_block = 1;
   string last_valid_cursor = 2;
 }
+
+message SessionInit {}
+message ModulesProgress {}

@@ -46,6 +46,14 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = PgPoolOptions::new()
         .max_connections(50)
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("SET synchronous_commit = 'off'")
+                    .execute(conn)
+                    .await?;
+                Ok(())
+            })
+        })
         .connect(&db_url)
         .await
         .context("postgres connection failed")?;
@@ -53,11 +61,10 @@ async fn main() -> anyhow::Result<()> {
     sqlx::migrate!("../migrations").run(&pool).await?;
     tracing::info!("migrations applied successfully");
 
-    let sync_state: Option<(String, i64)> = sqlx::query_as(
-        "SELECT cursor, last_block_number FROM sync_state WHERE id = 1"
-    )
-    .fetch_optional(&pool)
-    .await?;
+    let sync_state: Option<(String, i64)> =
+        sqlx::query_as("SELECT cursor, last_block_number FROM sync_state WHERE id = 1")
+            .fetch_optional(&pool)
+            .await?;
 
     let (start_cursor, start_block) = match sync_state {
         Some((cursor, last_block)) => {
@@ -65,11 +72,13 @@ async fn main() -> anyhow::Result<()> {
             (cursor, last_block)
         }
         None => {
-            tracing::info!("no saved state found, starting from block {}", default_start_block);
+            tracing::info!(
+                "no saved state found, starting from block {}",
+                default_start_block
+            );
             ("".into(), default_start_block)
         }
     };
-
 
     let spkg_bytes = std::fs::read(&spkg_path)
         .context(format!("failed to read .spkg file from path {}", spkg_path))?;
@@ -81,20 +90,14 @@ async fn main() -> anyhow::Result<()> {
         .connect()
         .await?;
 
-    let token_clean = token.trim().trim_matches('"').trim_matches('\'').to_string();
-
     let mut client = StreamClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
-        if token_clean.starts_with("ey") {
-            let auth_header = MetadataValue::try_from(format!("Bearer {}", token_clean))
-                .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
-            req.metadata_mut().insert("authorization", auth_header);
-        } else {
-            let api_key_header = MetadataValue::try_from(token_clean.as_str())
-                .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
-            req.metadata_mut().insert("x-api-key", api_key_header);
-        }
+        let auth_header = MetadataValue::try_from(format!("Bearer {}", token))
+            .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
+        req.metadata_mut().insert("authorization", auth_header);
         Ok(req)
-    });
+    })
+    .accept_compressed(tonic::codec::CompressionEncoding::Gzip)
+    .accept_compressed(tonic::codec::CompressionEncoding::Zstd);
 
     let request = Request {
         start_block_num: start_block,
