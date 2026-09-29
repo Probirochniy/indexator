@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: erc20_postgres
+    environment:
+      - POSTGRES_USER=${ERC_20_DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${ERC_20_DB_PASSWORD:-postgres}
+      - POSTGRES_DB=${ERC_20_DB_NAME:-erc20_indexer}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    command: >
+      postgres 
+      -c max_connections=200
+      -c shared_buffers=1GB
+      -c work_mem=64MB
+      -c maintenance_work_mem=512MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-erc20_indexer}"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  sink:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sink
+    container_name: erc20_sink
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    volumes:
+      - ./erc20.spkg:/app/erc20.spkg:ro
+      - ./migrations:/app/migrations:ro
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: api
+    container_name: erc20_api
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: erc20_ui
+    restart: always
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
