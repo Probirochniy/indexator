@@ -1,0 +1,25 @@
+[package]
+name = "sink"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[dependencies]
+tokio = { version = "1.38", features = ["full"] }
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "macros", "migrate", "bigdecimal"] }
+tonic = { version = "0.14.6", features = ["tls-ring", "tls-native-roots"] }
+tonic-prost = "0.14"
+prost = "0.14.4"
+prost-types = "0.14.4"
+dashmap = "6.2.1"
+num-bigint = "0.5.1"
+bigdecimal = "0.4"
+hex = "0.4"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+futures-util = "0.3"
+dotenvy = "0.15"
+
+[build-dependencies]
+tonic-prost-build = "0.14"
