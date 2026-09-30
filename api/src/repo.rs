@@ -42,7 +42,7 @@ impl Repo {
             )
             INSERT INTO tokens (address_id, symbol, name, decimals)
             SELECT id, $2, $3, $4 FROM target_addr
-            ON CONFLICT (address_id) DO UPDATE 
+            ON CONFLICT (address_id) DO UPDATE
             SET symbol = EXCLUDED.symbol, name = EXCLUDED.name, decimals = EXCLUDED.decimals;
             "#,
         )

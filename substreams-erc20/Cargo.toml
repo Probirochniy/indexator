@@ -7,12 +7,12 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-prost = "0.14.4"
+prost = "0.13"
 substreams = "0.7.6"
 substreams-ethereum = "0.11.1"
 hex = "0.4"
 num-bigint = "0.5.1"
-prost-types = "0.14.4"
+prost-types = "0.13"
 
 [build-dependencies]
-prost-build = "0.14.4"
+prost-build = "0.13"

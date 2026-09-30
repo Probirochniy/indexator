@@ -1,7 +1,6 @@
 use bigdecimal::BigDecimal;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::collections::{HashMap, HashSet};
-use std::io::ErrorKind::InvalidFilename;
 use std::str::FromStr;
 
 pub struct RawTransfer {
@@ -50,7 +49,7 @@ pub async fn process_block(
             let to_id = *addr_map.get(&t.to).unwrap();
             let amt = BigDecimal::from_str(&t.amount)?;
 
-            b_nums.push(block_number);
+            b_nums.push(t.block_number);
             l_idxs.push(t.log_index);
             tx_hashes.push(t.tx_hash.clone());
             token_ids.push(token_id);
@@ -74,7 +73,7 @@ pub async fn process_block(
 
         sqlx::query(
             r#"
-            INSERT INTO transfers 
+            INSERT INTO transfers
                 (block_number, log_index, tx_hash, token_address_id, from_address_id, to_address_id, amount)
             SELECT * FROM UNNEST(
                 $1::bigint[],
@@ -117,7 +116,7 @@ pub async fn process_block(
                     $3::bigint[],
                     $4::numeric[]
                 )
-                ON CONFLICT (block_number, account_id, token_address_id) 
+                ON CONFLICT (block_number, account_id, token_address_id)
                 DO UPDATE SET delta = EXCLUDED.delta;
                 "#,
             )
@@ -136,7 +135,7 @@ pub async fn process_block(
                     $2::bigint[],
                     $3::numeric[]
                 )
-                ON CONFLICT (account_id, token_address_id) 
+                ON CONFLICT (account_id, token_address_id)
                 DO UPDATE SET amount = balances.amount + EXCLUDED.amount;
                 "#,
             )
@@ -152,7 +151,7 @@ pub async fn process_block(
         r#"
         INSERT INTO sync_state (id, cursor, last_block_number, last_block_hash, last_final_block_number, updated_at)
         VALUES (1, $1, $2, $3, $4, NOW())
-        ON CONFLICT (id) DO UPDATE 
+        ON CONFLICT (id) DO UPDATE
         SET cursor = EXCLUDED.cursor, last_block_number = EXCLUDED.last_block_number, last_final_block_number = EXCLUDED.last_final_block_number, updated_at = NOW();
         "#,
     )
@@ -180,8 +179,8 @@ pub async fn process_undo(
     UPDATE balances b
     SET amount = b.amount - d.delta
     FROM balance_deltas d
-    WHERE b.account_id = d.account_id 
-      AND b.token_address_id = d.token_address_id 
+    WHERE b.account_id = d.account_id
+      AND b.token_address_id = d.token_address_id
       AND d.block_number > $1;
     "#,
     )
@@ -201,8 +200,8 @@ pub async fn process_undo(
 
     sqlx::query(
         r#"
-        UPDATE sync_state 
-        SET last_block_number = $1, cursor = $2, updated_at = NOW() 
+        UPDATE sync_state
+        SET last_block_number = $1, cursor = $2, updated_at = NOW()
         WHERE id = 1;
         "#,
     )

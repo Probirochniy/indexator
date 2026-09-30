@@ -1,4 +1,6 @@
-use crate::{AppState, domain::*, error::AppError, repo::Repo, rpc::fetch_token_metadata_from_chain};
+use crate::{
+    AppState, domain::*, error::AppError, repo::Repo, rpc::fetch_token_metadata_from_chain,
+};
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -34,7 +36,10 @@ pub async fn get_token_metadata(
         })));
     }
 
-    tracing::info!("metadata not found in DB, fetching from chain for {}", addr.to_hex());
+    tracing::info!(
+        "metadata not found in DB, fetching from chain for {}",
+        addr.to_hex()
+    );
     let fetched = fetch_token_metadata_from_chain(&state.rpc_url, &addr).await?;
 
     Repo::save_token_metadata(
@@ -43,7 +48,8 @@ pub async fn get_token_metadata(
         fetched.symbol.as_deref(),
         fetched.name.as_deref(),
         fetched.decimals,
-    ).await?;
+    )
+    .await?;
 
     Ok(Json(json!({
         "address": addr.to_hex(),

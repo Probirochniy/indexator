@@ -3,7 +3,7 @@
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct FieldOptions {
-    /// this option informs the `substreams pack` command that it should treat the corresponding manifest value as a path to a file, putting its content as bytes in this field. 
+    /// this option informs the `substreams pack` command that it should treat the corresponding manifest value as a path to a file, putting its content as bytes in this field.
     /// must be applied to a `bytes` or `string` field
     #[prost(bool, tag="1")]
     pub load_from_file: bool,

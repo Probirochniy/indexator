@@ -107,7 +107,6 @@ async fn main() -> anyhow::Result<()> {
         modules: package.modules,
         output_module: "map_transfers".to_string(),
         production_mode: true,
-        ..Default::default()
     };
 
     tracing::info!("connecting to substreams...");
@@ -122,32 +121,38 @@ async fn main() -> anyhow::Result<()> {
                 let final_block_num = block_data.final_block_height as i64;
                 let cursor = block_data.cursor;
 
-                if let Some(output) = block_data.output {
-                    if let Some(map_output) = output.map_output {
-                        let proto_transfers =
-                            erc20::Transfers::decode(map_output.value.as_slice())?;
+                // СХЛОПНУЛИ ДВА IF В ОДИН ЧЕРЕЗ and_then
+                if let Some(map_output) = block_data.output.and_then(|o| o.map_output) {
+                    let proto_transfers = erc20::Transfers::decode(map_output.value.as_slice())?;
 
-                        let raw_transfers: Vec<RawTransfer> = proto_transfers
-                            .transfers
-                            .into_iter()
-                            .map(|t| RawTransfer {
-                                token: t.token_address,
-                                from: t.from,
-                                to: t.to,
-                                amount: t.amount,
-                                tx_hash: t.transaction_hash,
-                                block_number: block_num,
-                                log_index: t.log_index as i32,
-                            })
-                            .collect();
+                    let raw_transfers: Vec<RawTransfer> = proto_transfers
+                        .transfers
+                        .into_iter()
+                        .map(|t| RawTransfer {
+                            token: t.token_address,
+                            from: t.from,
+                            to: t.to,
+                            amount: t.amount,
+                            tx_hash: t.transaction_hash,
+                            block_number: block_num,
+                            log_index: t.log_index as i32,
+                        })
+                        .collect();
 
-                        process_block(&pool, &cache, block_num, final_block_num, &raw_transfers, &cursor).await?;
-                        tracing::info!(
-                            "block {} written transfers: {}",
-                            block_num,
-                            raw_transfers.len()
-                        );
-                    }
+                    process_block(
+                        &pool,
+                        &cache,
+                        block_num,
+                        final_block_num,
+                        &raw_transfers,
+                        &cursor,
+                    )
+                    .await?;
+                    tracing::info!(
+                        "block {} written transfers: {}",
+                        block_num,
+                        raw_transfers.len()
+                    );
                 }
             }
 

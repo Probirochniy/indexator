@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "api",
+    "sink",
+]
+exclude = [
+    "substreams-erc20",
+]
+resolver = "3"

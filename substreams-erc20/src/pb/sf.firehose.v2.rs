@@ -160,7 +160,7 @@ pub struct InfoResponse {
     /// Alternate names for the chain.
     #[prost(string, repeated, tag="2")]
     pub chain_name_aliases: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// First block that is served by this endpoint. This should usually be the genesis block, 
+    /// First block that is served by this endpoint. This should usually be the genesis block,
     /// but some providers may have truncated history.
     #[prost(uint64, tag="3")]
     pub first_streamable_block_num: u64,
