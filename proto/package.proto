@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package sf.substreams.v1;
+
+import "substreams.proto";
+
+message Package {
+  uint64 version = 5;
+  sf.substreams.rpc.v2.Modules modules = 6;
+}
