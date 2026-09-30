@@ -176,12 +176,20 @@ pub async fn process_undo(
 
     sqlx::query(
         r#"
+        WITH aggregated_deltas AS (
+        SELECT
+            account_id,
+            token_address_id,
+            SUM(delta) AS total_delta
+        FROM balance_deltas
+        WHERE block_number > $1
+        GROUP BY account_id, token_address_id
+    )
     UPDATE balances b
-    SET amount = b.amount - d.delta
-    FROM balance_deltas d
-    WHERE b.account_id = d.account_id
-      AND b.token_address_id = d.token_address_id
-      AND d.block_number > $1;
+    SET amount = b.amount - ad.total_delta
+    FROM aggregated_deltas ad
+    WHERE b.account_id = ad.account_id
+      AND b.token_address_id = ad.token_address_id;
     "#,
     )
     .bind(last_valid_block)

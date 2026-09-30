@@ -1,15 +1,15 @@
-use dashmap::DashMap;
+use moka::sync::Cache;
 use sqlx::{PgConnection, Row};
 use std::collections::{HashMap, HashSet};
 
 pub struct AddressCache {
-    cache: DashMap<Vec<u8>, i64>,
+    cache: Cache<Vec<u8>, i64>,
 }
 
 impl AddressCache {
-    pub fn new() -> Self {
+    pub fn new(capacity: u64) -> Self {
         Self {
-            cache: DashMap::new(),
+            cache: Cache::builder().max_capacity(capacity).build(),
         }
     }
 
@@ -18,12 +18,12 @@ impl AddressCache {
         hashes: HashSet<Vec<u8>>,
         tx: &mut PgConnection,
     ) -> anyhow::Result<HashMap<Vec<u8>, i64>> {
-        let mut result = HashMap::new();
+        let mut result = HashMap::with_capacity(hashes.len());
         let mut missing = Vec::new();
 
         for hash in hashes {
             if let Some(id) = self.cache.get(&hash) {
-                result.insert(hash, *id);
+                result.insert(hash, id);
             } else {
                 missing.push(hash);
             }

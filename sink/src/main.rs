@@ -111,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("connecting to substreams...");
     let mut stream = client.blocks(request).await?.into_inner();
-    let cache = Arc::new(AddressCache::new());
+    let cache = Arc::new(AddressCache::new(500_000));
 
     while let Some(resp) = stream.message().await? {
         match resp.message {
