@@ -16,12 +16,14 @@ struct RawTransferRow {
 }
 
 impl Repo {
-    pub async fn get_sync_state(pool: &PgPool) -> Result<Option<(i64, i64, String)>, AppError> {
-        let row: Option<(i64, i64, String)> = sqlx::query_as(
-            "SELECT last_block_number, last_final_block_number, updated_at::text FROM sync_state WHERE id = 1"
-        )
-        .fetch_optional(pool)
-        .await?;
+    pub async fn get_sync_state(
+        pool: &PgPool,
+    ) -> Result<Option<(i64, i64, i64, String)>, AppError> {
+        let row = sqlx::query_as(
+        "SELECT last_block_number, last_final_block_number, head_block_number, updated_at::text FROM sync_state WHERE id = 1"
+    )
+    .fetch_optional(pool)
+    .await?;
         Ok(row)
     }
 

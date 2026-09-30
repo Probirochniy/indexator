@@ -2,8 +2,8 @@ CREATE TABLE IF NOT EXISTS sync_state ( -- save checked blocks
     id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     cursor TEXT NOT NULL,
     last_block_number BIGINT NOT NULL,
-    last_block_hash BYTEA NOT NULL,
     last_final_block_number BIGINT NOT NULL DEFAULT 0,
+    head_block_number BIGINT NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -23,9 +23,9 @@ CREATE TABLE IF NOT EXISTS transfers (
     block_number BIGINT NOT NULL,
     log_index INT NOT NULL,
     tx_hash BYTEA NOT NULL CHECK (octet_length(tx_hash) = 32),
-    token_address_id BIGINT NOT NULL REFERENCES addresses(id), -- 2bytes -> 8bytes, may be harmful?
-    from_address_id BIGINT NOT NULL REFERENCES addresses(id),
-    to_address_id BIGINT NOT NULL REFERENCES addresses(id),
+    token_address_id BIGINT NOT NULL,  -- REFERENCES addresses(id), -- 2bytes -> 8bytes, may be harmful?
+    from_address_id BIGINT NOT NULL, -- REFERENCES addresses(id),
+    to_address_id BIGINT NOT NULL, -- REFERENCES addresses(id),
     amount NUMERIC(78, 0) NOT NULL,
     PRIMARY KEY (block_number, log_index) -- instead of id
 );
@@ -55,5 +55,3 @@ CREATE TABLE IF NOT EXISTS balance_deltas (
     delta NUMERIC(78, 0) NOT NULL,
     PRIMARY KEY (block_number, account_id, token_address_id)
 );
-
-CREATE INDEX IF NOT EXISTS idx_balance_deltas_block ON balance_deltas (block_number);

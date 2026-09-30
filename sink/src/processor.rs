@@ -13,13 +13,18 @@ pub struct RawTransfer {
     pub log_index: i32,
 }
 
-pub async fn process_block(
+pub struct BatchMeta {
+    pub last_block_number: i64,
+    pub last_final_block_number: i64,
+    pub head_block_number: i64,
+    pub last_cursor: String,
+}
+
+pub async fn process_batch(
     pool: &PgPool,
     cache: &crate::address_cache::AddressCache,
-    block_number: i64,
-    final_block_number: i64,
     transfers: &[RawTransfer],
-    cursor: &str,
+    meta: &BatchMeta,
 ) -> anyhow::Result<()> {
     let mut tx: Transaction<'_, Postgres> = pool.begin().await?;
 
@@ -40,7 +45,9 @@ pub async fn process_block(
         let mut to_ids = Vec::with_capacity(transfers.len());
         let mut amounts = Vec::with_capacity(transfers.len());
 
-        let mut deltas: HashMap<(i64, i64), BigDecimal> = HashMap::new();
+        let mut block_deltas: HashMap<(i64, i64, i64), BigDecimal> = HashMap::new();
+        let mut total_deltas: HashMap<(i64, i64), BigDecimal> = HashMap::new();
+
         let zero_addr = [0u8; 20];
 
         for t in transfers {
@@ -57,17 +64,27 @@ pub async fn process_block(
             to_ids.push(to_id);
             amounts.push(amt.clone());
 
+            let is_reversible = t.block_number > meta.last_final_block_number;
+
             if t.from != zero_addr {
-                let entry = deltas
+                if is_reversible {
+                    *block_deltas
+                        .entry((t.block_number, from_id, token_id))
+                        .or_insert_with(|| BigDecimal::from(0)) -= &amt;
+                }
+                *total_deltas
                     .entry((from_id, token_id))
-                    .or_insert(BigDecimal::from(0));
-                *entry = &*entry - &amt;
+                    .or_insert_with(|| BigDecimal::from(0)) -= &amt;
             }
             if t.to != zero_addr {
-                let entry = deltas
+                if is_reversible {
+                    *block_deltas
+                        .entry((t.block_number, to_id, token_id))
+                        .or_insert_with(|| BigDecimal::from(0)) += &amt;
+                }
+                *total_deltas
                     .entry((to_id, token_id))
-                    .or_insert(BigDecimal::from(0));
-                *entry = &*entry + &amt;
+                    .or_insert_with(|| BigDecimal::from(0)) += &amt;
             }
         }
 
@@ -97,21 +114,24 @@ pub async fn process_block(
         .execute(&mut *tx)
         .await?;
 
-        if !deltas.is_empty() {
-            let mut d_accs = Vec::with_capacity(deltas.len());
-            let mut d_tokens = Vec::with_capacity(deltas.len());
-            let mut d_amts = Vec::with_capacity(deltas.len());
+        if !block_deltas.is_empty() {
+            let mut bd_blocks = Vec::with_capacity(block_deltas.len());
+            let mut bd_accs = Vec::with_capacity(block_deltas.len());
+            let mut bd_tokens = Vec::with_capacity(block_deltas.len());
+            let mut bd_amts = Vec::with_capacity(block_deltas.len());
 
-            for ((acc_id, tok_id), delta) in deltas {
-                d_accs.push(acc_id);
-                d_tokens.push(tok_id);
-                d_amts.push(delta);
+            for ((b_num, acc_id, tok_id), delta) in block_deltas {
+                bd_blocks.push(b_num);
+                bd_accs.push(acc_id);
+                bd_tokens.push(tok_id);
+                bd_amts.push(delta);
             }
 
             sqlx::query(
                 r#"
                 INSERT INTO balance_deltas (block_number, account_id, token_address_id, delta)
-                SELECT $1, * FROM UNNEST(
+                SELECT * FROM UNNEST(
+                    $1::bigint[],
                     $2::bigint[],
                     $3::bigint[],
                     $4::numeric[]
@@ -120,12 +140,24 @@ pub async fn process_block(
                 DO UPDATE SET delta = EXCLUDED.delta;
                 "#,
             )
-            .bind(block_number)
-            .bind(&d_accs)
-            .bind(&d_tokens)
-            .bind(&d_amts)
+            .bind(&bd_blocks)
+            .bind(&bd_accs)
+            .bind(&bd_tokens)
+            .bind(&bd_amts)
             .execute(&mut *tx)
             .await?;
+        }
+
+        if !total_deltas.is_empty() {
+            let mut d_accs = Vec::with_capacity(total_deltas.len());
+            let mut d_tokens = Vec::with_capacity(total_deltas.len());
+            let mut d_amts = Vec::with_capacity(total_deltas.len());
+
+            for ((acc_id, tok_id), delta) in total_deltas {
+                d_accs.push(acc_id);
+                d_tokens.push(tok_id);
+                d_amts.push(delta);
+            }
 
             sqlx::query(
                 r#"
@@ -147,18 +179,29 @@ pub async fn process_block(
         }
     }
 
+    if meta.last_final_block_number > 0 {
+        sqlx::query("DELETE FROM balance_deltas WHERE block_number <= $1;")
+            .bind(meta.last_final_block_number)
+            .execute(&mut *tx)
+            .await?;
+    }
+
     sqlx::query(
         r#"
-        INSERT INTO sync_state (id, cursor, last_block_number, last_block_hash, last_final_block_number, updated_at)
+        INSERT INTO sync_state (id, cursor, last_block_number, last_final_block_number, head_block_number, updated_at)
         VALUES (1, $1, $2, $3, $4, NOW())
         ON CONFLICT (id) DO UPDATE
-        SET cursor = EXCLUDED.cursor, last_block_number = EXCLUDED.last_block_number, last_final_block_number = EXCLUDED.last_final_block_number, updated_at = NOW();
+        SET cursor = EXCLUDED.cursor,
+            last_block_number = EXCLUDED.last_block_number,
+            last_final_block_number = EXCLUDED.last_final_block_number,
+            head_block_number = GREATEST(sync_state.head_block_number, EXCLUDED.head_block_number),
+            updated_at = NOW();
         "#,
     )
-    .bind(cursor)
-    .bind(block_number)
-    .bind(&[0u8; 32][..])
-    .bind(final_block_number)
+    .bind(&meta.last_cursor)
+    .bind(meta.last_block_number)
+    .bind(meta.last_final_block_number)
+    .bind(meta.head_block_number)
     .execute(&mut *tx)
     .await?;
 

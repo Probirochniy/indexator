@@ -74,19 +74,23 @@ impl ProgressTracker {
         }
     }
 
-    fn on_block_processed(&mut self, block_num: i64, transfers_count: usize) {
-        self.blocks_batch += 1;
+    fn on_batch_processed(
+        &mut self,
+        blocks_count: usize,
+        transfers_count: usize,
+        last_block_num: i64,
+    ) {
+        self.blocks_batch += blocks_count as u64;
         self.transfers_batch += transfers_count as u64;
 
+        let elapsed = self.last_log.elapsed();
         let head = self
             .head_atomic
             .load(Ordering::Relaxed)
-            .max(block_num as u64);
-        let elapsed = self.last_log.elapsed();
-        let lag = head.saturating_sub(block_num as u64);
-        let near_head = lag <= 5;
+            .max(last_block_num as u64);
+        let lag = head.saturating_sub(last_block_num as u64);
 
-        if elapsed >= Duration::from_secs(2) || (near_head && transfers_count > 0) {
+        if elapsed >= Duration::from_secs(2) {
             let secs = elapsed.as_secs_f64();
             let bps = if secs > 0.0 {
                 self.blocks_batch as f64 / secs
@@ -100,8 +104,8 @@ impl ProgressTracker {
             };
 
             tracing::info!(
-                "block #{} | speed: {:.1} blk/s ({:.0} tx/s) | lag: {} blk | head: #{}",
-                block_num,
+                "synced to #{} | speed: {:.1} blk/s ({:.0} tx/s) | lag: {} blk | head: #{}",
+                last_block_num,
                 bps,
                 tps,
                 lag,
@@ -202,6 +206,12 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(poll_chain_head(rpc_url, chain_head.clone()));
     let mut tracker = ProgressTracker::new(chain_head.clone());
 
+    let mut buffer_transfers: Vec<RawTransfer> = Vec::new();
+    let mut buffered_blocks_count: usize = 0;
+    let mut last_block_num: i64;
+    let mut last_final_block_num: i64;
+    let mut last_cursor: String;
+
     while let Some(resp) = stream.message().await? {
         match resp.message {
             Some(SubstreamsMessage::BlockScopedData(block_data)) => {
@@ -213,10 +223,8 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(map_output) = block_data.output.and_then(|o| o.map_output) {
                     let proto_transfers = erc20::Transfers::decode(map_output.value.as_slice())?;
 
-                    let raw_transfers: Vec<RawTransfer> = proto_transfers
-                        .transfers
-                        .into_iter()
-                        .map(|t| RawTransfer {
+                    for t in proto_transfers.transfers {
+                        buffer_transfers.push(RawTransfer {
                             token: t.token_address,
                             from: t.from,
                             to: t.to,
@@ -224,29 +232,51 @@ async fn main() -> anyhow::Result<()> {
                             tx_hash: t.transaction_hash,
                             block_number: block_num,
                             log_index: t.log_index as i32,
-                        })
-                        .collect();
+                        });
+                    }
 
-                    process_block(
-                        &pool,
-                        &cache,
-                        block_num,
-                        final_block_num,
-                        &raw_transfers,
-                        &cursor,
-                    )
-                    .await?;
+                    buffered_blocks_count += 1;
+                    last_block_num = block_num;
+                    last_final_block_num = final_block_num;
+                    last_cursor = cursor;
 
-                    let tx_len = raw_transfers.len();
-                    tracker.on_block_processed(block_num, tx_len);
+                    let head = chain_head.load(Ordering::Relaxed).max(block_num as u64) as i64;
+                    let lag = head.saturating_sub(block_num);
+
+                    let should_flush = if lag > 5 {
+                        buffered_blocks_count >= 100 || buffer_transfers.len() >= 10_000
+                    } else {
+                        true
+                    };
+
+                    if should_flush {
+                        let meta = BatchMeta {
+                            last_block_number: last_block_num,
+                            last_final_block_number: last_final_block_num,
+                            head_block_number: head,
+                            last_cursor: last_cursor.clone(),
+                        };
+
+                        let tx_count = buffer_transfers.len();
+                        let blk_count = buffered_blocks_count;
+
+                        process_batch(&pool, &cache, &buffer_transfers, &meta).await?;
+
+                        tracker.on_batch_processed(blk_count, tx_count, last_block_num);
+
+                        buffer_transfers.clear();
+                        buffered_blocks_count = 0;
+                    }
                 }
             }
 
-            // Reorg
             Some(SubstreamsMessage::BlockUndoSignal(undo)) => {
                 let last_valid = undo.last_valid_block.context("no last_valid_block")?;
                 let last_valid_num = last_valid.number as i64;
                 let cursor = undo.last_valid_cursor;
+
+                buffer_transfers.clear();
+                buffered_blocks_count = 0;
 
                 tracing::warn!(
                     "REORG signal received! rolling back to block #{}",

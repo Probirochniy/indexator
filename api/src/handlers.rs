@@ -1,6 +1,5 @@
 use crate::{
-    AppState, domain::*, error::AppError, repo::Repo, rpc::fetch_head_block_number,
-    rpc::fetch_token_metadata_from_chain,
+    AppState, domain::*, error::AppError, repo::Repo, rpc::fetch_token_metadata_from_chain,
 };
 use axum::{
     Json,
@@ -13,12 +12,9 @@ pub async fn get_status(State(state): State<Arc<AppState>>) -> Result<Json<Value
     let state_row = Repo::get_sync_state(&state.pool).await?;
 
     match state_row {
-        Some((last_block, finalized_block, updated_at)) => {
-            let head_block = fetch_head_block_number(&state.rpc_url)
-                .await
-                .unwrap_or(last_block);
+        Some((last_block, finalized_block, head_block, updated_at)) => {
             let lag_blocks = (head_block - last_block).max(0);
-            let lag_seconds = lag_blocks * 12; // 12 seconds are hardcoded
+            let lag_seconds = lag_blocks * 12;
 
             Ok(Json(json!({
                 "last_indexed_block": last_block,
