@@ -21,6 +21,8 @@ tracing-subscriber = "0.3"
 futures-util = "0.3"
 dotenvy = "0.15"
 moka = { version = "0.12", features = ["sync"] }
+serde_json = "1.0.151"
+reqwest = "0.13.5"
 
 [build-dependencies]
 tonic-prost-build = "0.14"

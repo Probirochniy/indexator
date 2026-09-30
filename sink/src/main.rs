@@ -1,8 +1,11 @@
 use anyhow::Context;
 use prost::Message;
+use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::env;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
 
@@ -29,12 +32,96 @@ use sf::substreams::rpc::v2::stream_client::StreamClient;
 use sf::substreams::rpc::v2::{Request, response::Message as SubstreamsMessage};
 use sf::substreams::v1::Package;
 
+async fn poll_chain_head(rpc_url: String, head_atomic: Arc<AtomicU64>) {
+    let client = reqwest::Client::new();
+    loop {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_blockNumber",
+            "params": []
+        });
+
+        if let Ok(res) = client.post(&rpc_url).body(payload.to_string()).send().await
+            && let Ok(body) = res.text().await
+            && let Ok(val) = serde_json::from_str::<serde_json::Value>(&body)
+            && let Some(hex_str) = val.get("result").and_then(|r| r.as_str())
+        {
+            let clean = hex_str.trim_start_matches("0x").trim_start_matches("0X");
+            if let Ok(num) = u64::from_str_radix(clean, 16) {
+                head_atomic.store(num, Ordering::Relaxed);
+            }
+        }
+
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    }
+}
+
+struct ProgressTracker {
+    head_atomic: Arc<AtomicU64>,
+    last_log: Instant,
+    blocks_batch: u64,
+    transfers_batch: u64,
+}
+
+impl ProgressTracker {
+    fn new(head_atomic: Arc<AtomicU64>) -> Self {
+        Self {
+            head_atomic,
+            last_log: Instant::now(),
+            blocks_batch: 0,
+            transfers_batch: 0,
+        }
+    }
+
+    fn on_block_processed(&mut self, block_num: i64, transfers_count: usize) {
+        self.blocks_batch += 1;
+        self.transfers_batch += transfers_count as u64;
+
+        let head = self
+            .head_atomic
+            .load(Ordering::Relaxed)
+            .max(block_num as u64);
+        let elapsed = self.last_log.elapsed();
+        let lag = head.saturating_sub(block_num as u64);
+        let near_head = lag <= 5;
+
+        if elapsed >= Duration::from_secs(2) || (near_head && transfers_count > 0) {
+            let secs = elapsed.as_secs_f64();
+            let bps = if secs > 0.0 {
+                self.blocks_batch as f64 / secs
+            } else {
+                0.0
+            };
+            let tps = if secs > 0.0 {
+                self.transfers_batch as f64 / secs
+            } else {
+                0.0
+            };
+
+            tracing::info!(
+                "block #{} | speed: {:.1} blk/s ({:.0} tx/s) | lag: {} blk | head: #{}",
+                block_num,
+                bps,
+                tps,
+                lag,
+                head
+            );
+
+            self.last_log = Instant::now();
+            self.blocks_batch = 0;
+            self.transfers_batch = 0;
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt::init();
 
     let db_url = env::var("DATABASE_URL").context("DATABASE_URL is required")?;
+    let rpc_url = env::var("ETH_RPC_URL").context("ETH_RPC_URL missing")?;
     let token = env::var("SUBSTREAMS_API_TOKEN").context("SUBSTREAMS_API_TOKEN is required")?;
     let endpoint = env::var("SUBSTREAMS_ENDPOINT").context("SUBSTREAMS_ENDPOINT is required")?;
     let spkg_path = env::var("SPKG_PATH").context("SPKG_PATH is required")?;
@@ -111,6 +198,10 @@ async fn main() -> anyhow::Result<()> {
     let mut stream = client.blocks(request).await?.into_inner();
     let cache = Arc::new(AddressCache::new(500_000));
 
+    let chain_head = Arc::new(AtomicU64::new(0));
+    tokio::spawn(poll_chain_head(rpc_url, chain_head.clone()));
+    let mut tracker = ProgressTracker::new(chain_head.clone());
+
     while let Some(resp) = stream.message().await? {
         match resp.message {
             Some(SubstreamsMessage::BlockScopedData(block_data)) => {
@@ -145,11 +236,9 @@ async fn main() -> anyhow::Result<()> {
                         &cursor,
                     )
                     .await?;
-                    tracing::info!(
-                        "block {} written transfers: {}",
-                        block_num,
-                        raw_transfers.len()
-                    );
+
+                    let tx_len = raw_transfers.len();
+                    tracker.on_block_processed(block_num, tx_len);
                 }
             }
 
@@ -159,6 +248,10 @@ async fn main() -> anyhow::Result<()> {
                 let last_valid_num = last_valid.number as i64;
                 let cursor = undo.last_valid_cursor;
 
+                tracing::warn!(
+                    "REORG signal received! rolling back to block #{}",
+                    last_valid_num
+                );
                 process_undo(&pool, last_valid_num, &cursor).await?;
             }
 
