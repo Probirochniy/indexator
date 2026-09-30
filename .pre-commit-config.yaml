@@ -33,8 +33,15 @@ repos:
         pass_filenames: false
 
       - id: cargo-test
-        name: cargo test (workspace)
-        entry: cargo test --workspace
+        name: cargo unit test (workspace)
+        entry: cargo test --workspace --lib --bins
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-test-substreams
+        name: cargo unit test (substreams)
+        entry: cargo test --manifest-path substreams-erc20/Cargo.toml --lib
         language: system
         types: [rust]
         pass_filenames: false

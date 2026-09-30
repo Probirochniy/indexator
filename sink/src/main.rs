@@ -6,10 +6,8 @@ use std::sync::Arc;
 use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
 
-mod address_cache;
-mod processor;
-use address_cache::AddressCache;
-use processor::{RawTransfer, process_block, process_undo};
+use sink::address_cache::*;
+use sink::processor::*;
 
 pub mod sf {
     pub mod substreams {
@@ -121,7 +119,6 @@ async fn main() -> anyhow::Result<()> {
                 let final_block_num = block_data.final_block_height as i64;
                 let cursor = block_data.cursor;
 
-                // СХЛОПНУЛИ ДВА IF В ОДИН ЧЕРЕЗ and_then
                 if let Some(map_output) = block_data.output.and_then(|o| o.map_output) {
                     let proto_transfers = erc20::Transfers::decode(map_output.value.as_slice())?;
 
