@@ -119,6 +119,7 @@ async fn main() -> anyhow::Result<()> {
             Some(SubstreamsMessage::BlockScopedData(block_data)) => {
                 let clock = block_data.clock.context("no clock in block")?;
                 let block_num = clock.number as i64;
+                let final_block_num = block_data.final_block_height as i64;
                 let cursor = block_data.cursor;
 
                 if let Some(output) = block_data.output {
@@ -140,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
                             })
                             .collect();
 
-                        process_block(&pool, &cache, block_num, &raw_transfers, &cursor).await?;
+                        process_block(&pool, &cache, block_num, final_block_num, &raw_transfers, &cursor).await?;
                         tracing::info!(
                             "block {} written transfers: {}",
                             block_num,

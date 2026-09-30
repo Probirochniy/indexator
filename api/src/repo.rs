@@ -1,4 +1,4 @@
-use crate::domain::{to_hex, Address, KeysetParams, Page, TransferDto};
+use crate::domain::{Address, KeysetParams, Page, TransferDto, to_hex};
 use crate::error::AppError;
 use sqlx::PgPool;
 
@@ -16,22 +16,56 @@ struct RawTransferRow {
 }
 
 impl Repo {
-    pub async fn get_sync_state(pool: &PgPool) -> Result<Option<(i64, String)>, AppError> {
-        let row: Option<(i64, String)> = sqlx::query_as(
-            "SELECT last_block_number, updated_at::text FROM sync_state WHERE id = 1"
+    pub async fn get_sync_state(pool: &PgPool) -> Result<Option<(i64, i64, String)>, AppError> {
+        let row: Option<(i64, i64, String)> = sqlx::query_as(
+            "SELECT last_block_number, last_final_block_number, updated_at::text FROM sync_state WHERE id = 1"
         )
         .fetch_optional(pool)
         .await?;
         Ok(row)
     }
 
-    pub async fn get_token_metadata(pool: &PgPool, addr: &Address) -> Result<Option<(Option<String>, Option<String>, Option<i16>)>, AppError> {
+    pub async fn save_token_metadata(
+        pool: &PgPool,
+        addr: &Address,
+        symbol: Option<&str>,
+        name: Option<&str>,
+        decimals: Option<i16>,
+    ) -> Result<(), AppError> {
+        sqlx::query(
+            r#"
+            WITH target_addr AS (
+                INSERT INTO addresses (hash)
+                VALUES ($1)
+                ON CONFLICT (hash) DO UPDATE SET hash = EXCLUDED.hash
+                RETURNING id
+            )
+            INSERT INTO tokens (address_id, symbol, name, decimals)
+            SELECT id, $2, $3, $4 FROM target_addr
+            ON CONFLICT (address_id) DO UPDATE 
+            SET symbol = EXCLUDED.symbol, name = EXCLUDED.name, decimals = EXCLUDED.decimals;
+            "#,
+        )
+        .bind(addr.as_slice())
+        .bind(symbol)
+        .bind(name)
+        .bind(decimals)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_token_metadata(
+        pool: &PgPool,
+        addr: &Address,
+    ) -> Result<Option<(Option<String>, Option<String>, Option<i16>)>, AppError> {
         let row = sqlx::query_as(
             r#"
             SELECT t.symbol, t.name, t.decimals
             FROM tokens t
             WHERE t.address_id = (SELECT id FROM addresses WHERE hash = $1)
-            "#
+            "#,
         )
         .bind(addr.as_slice())
         .fetch_optional(pool)
@@ -39,15 +73,18 @@ impl Repo {
         Ok(row)
     }
 
-    pub async fn get_address_balances(pool: &PgPool, addr: &Address) -> Result<Vec<(Vec<u8>, Option<String>)>, AppError> {
+    pub async fn get_address_balances(
+        pool: &PgPool,
+        addr: &Address,
+    ) -> Result<Vec<(Vec<u8>, Option<String>)>, AppError> {
         let rows = sqlx::query_as(
             r#"
-            SELECT toka.hash, b.amount::text
+            SELECT a.hash, b.amount::text
             FROM balances b
-            JOIN addresses toka ON b.token_address_id = toka.id
+            JOIN addresses a ON b.token_address_id = a.id
             WHERE b.account_id = (SELECT id FROM addresses WHERE hash = $1)
               AND b.amount > 0
-            "#
+            "#,
         )
         .bind(addr.as_slice())
         .fetch_all(pool)
@@ -56,15 +93,11 @@ impl Repo {
     }
 
     pub async fn get_finalized_boundary(pool: &PgPool) -> i64 {
-        let last_block = sqlx::query_scalar::<_, i64>(
-            "SELECT last_block_number FROM sync_state WHERE id = 1"
-        )
-        .fetch_optional(pool)
-        .await
-        .unwrap_or_default()
-        .unwrap_or(0);
-
-        (last_block - 64).max(0)
+        sqlx::query_scalar::<_, i64>("SELECT last_final_block_number FROM sync_state WHERE id = 1")
+            .fetch_optional(pool)
+            .await
+            .unwrap_or_default()
+            .unwrap_or(0)
     }
 
     pub async fn get_token_transfers(
@@ -196,5 +229,4 @@ impl Repo {
             next_cursor_log: next_cursor.map(|c| c.1),
         })
     }
-
 }

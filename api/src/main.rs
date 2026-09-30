@@ -2,6 +2,7 @@ mod domain;
 mod error;
 mod handlers;
 mod repo;
+mod rpc;
 
 use anyhow::Context;
 use axum::{Router, routing::get};
@@ -10,6 +11,7 @@ use std::sync::Arc;
 
 pub struct AppState {
     pub pool: sqlx::PgPool,
+    pub rpc_url: String,
 }
 
 #[tokio::main]
@@ -24,7 +26,9 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(50)
         .connect(&db_url)
         .await?;
-    let state = Arc::new(AppState { pool });
+    let rpc_url = std::env::var("ETH_RPC_URL").context("ETH_RPC_URL missing")?;
+
+    let state = Arc::new(AppState { pool, rpc_url });
 
     let app = Router::new()
         .route("/v1/status", get(handlers::get_status))

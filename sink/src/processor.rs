@@ -1,6 +1,7 @@
 use bigdecimal::BigDecimal;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::collections::{HashMap, HashSet};
+use std::io::ErrorKind::InvalidFilename;
 use std::str::FromStr;
 
 pub struct RawTransfer {
@@ -17,6 +18,7 @@ pub async fn process_block(
     pool: &PgPool,
     cache: &crate::address_cache::AddressCache,
     block_number: i64,
+    final_block_number: i64,
     transfers: &[RawTransfer],
     cursor: &str,
 ) -> anyhow::Result<()> {
@@ -31,7 +33,6 @@ pub async fn process_block(
         }
         let addr_map = cache.resolve_addresses(all_hashes, &mut tx).await?;
 
-        // 1. подготавливаем плоские массивы под UNNEST для трансферов
         let mut b_nums = Vec::with_capacity(transfers.len());
         let mut l_idxs = Vec::with_capacity(transfers.len());
         let mut tx_hashes = Vec::with_capacity(transfers.len());
@@ -58,11 +59,15 @@ pub async fn process_block(
             amounts.push(amt.clone());
 
             if t.from != zero_addr {
-                let entry = deltas.entry((from_id, token_id)).or_insert(BigDecimal::from(0));
+                let entry = deltas
+                    .entry((from_id, token_id))
+                    .or_insert(BigDecimal::from(0));
                 *entry = &*entry - &amt;
             }
             if t.to != zero_addr {
-                let entry = deltas.entry((to_id, token_id)).or_insert(BigDecimal::from(0));
+                let entry = deltas
+                    .entry((to_id, token_id))
+                    .or_insert(BigDecimal::from(0));
                 *entry = &*entry + &amt;
             }
         }
@@ -145,15 +150,16 @@ pub async fn process_block(
 
     sqlx::query(
         r#"
-        INSERT INTO sync_state (id, cursor, last_block_number, last_block_hash, updated_at)
-        VALUES (1, $1, $2, $3, NOW())
+        INSERT INTO sync_state (id, cursor, last_block_number, last_block_hash, last_final_block_number, updated_at)
+        VALUES (1, $1, $2, $3, $4, NOW())
         ON CONFLICT (id) DO UPDATE 
-        SET cursor = EXCLUDED.cursor, last_block_number = EXCLUDED.last_block_number, updated_at = NOW();
+        SET cursor = EXCLUDED.cursor, last_block_number = EXCLUDED.last_block_number, last_final_block_number = EXCLUDED.last_final_block_number, updated_at = NOW();
         "#,
     )
     .bind(cursor)
     .bind(block_number)
     .bind(&[0u8; 32][..])
+    .bind(final_block_number)
     .execute(&mut *tx)
     .await?;
 

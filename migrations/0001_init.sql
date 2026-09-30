@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS sync_state (
     cursor TEXT NOT NULL,
     last_block_number BIGINT NOT NULL,
     last_block_hash BYTEA NOT NULL,
+    last_final_block_number BIGINT NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
