@@ -91,3 +91,34 @@ fn parse_abi_uint(hex_raw: &str) -> Option<i16> {
     }
     bytes.last().map(|&b| b as i16)
 }
+
+#[derive(Deserialize)]
+struct BlockNumResponse {
+    result: Option<String>,
+}
+
+pub async fn fetch_head_block_number(rpc_url: &str) -> Result<i64, AppError> {
+    let client = reqwest::Client::new();
+    let payload = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_blockNumber",
+        "params": []
+    });
+
+    let res = client
+        .post(rpc_url)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::error!("rpc eth_blockNumber failed: {:?}", e);
+            AppError::NotFound
+        })?;
+
+    let parsed: BlockNumResponse = res.json().await.map_err(|_| AppError::NotFound)?;
+    let hex_val = parsed.result.ok_or(AppError::NotFound)?;
+    let clean = hex_val.trim_start_matches("0x").trim_start_matches("0X");
+
+    i64::from_str_radix(clean, 16).map_err(|_| AppError::NotFound)
+}

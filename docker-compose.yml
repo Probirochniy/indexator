@@ -38,7 +38,6 @@ services:
     env_file:
       - .env
     volumes:
-      - ./erc20.spkg:/app/erc20.spkg:ro
       - ./migrations:/app/migrations:ro
 
   api:
