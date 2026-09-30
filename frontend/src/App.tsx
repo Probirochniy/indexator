@@ -37,17 +37,7 @@ export default function App() {
         gap: '15px',
         marginBottom: '15px'
       }}>
-        <img
-          src="https://media.tenor.com/h_jy2s28rlYAAAAj/spinning-cat.gif"
-          alt="left chad"
-          style={{ width: '48px', height: '48px', objectFit: 'contain' }}
-        />
-        <h2 style={{ margin: 0 }}>ERC20 DEBUGGER ДЛЯ ПАЦАНОВ</h2>
-        <img
-          src="https://media.tenor.com/kBAX25HbTYwAAAAj/cat-rotating.gif"
-          alt="right chad"
-          style={{ width: '48px', height: '48px', objectFit: 'contain' }}
-        />
+        <h2 style={{ margin: 0 }}>ERC20 DEBUGGER</h2>
       </div>
 
       <div style={{ background: '#222', padding: '10px', borderRadius: '4px', marginBottom: '20px' }}>
